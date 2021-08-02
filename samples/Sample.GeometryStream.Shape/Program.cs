@@ -25,6 +25,7 @@ using NetTopologySuite.Geometries;
 using NetTopologySuite.IO;
 using OsmSharp;
 using OsmSharp.Geo;
+using OsmSharp.Logging;
 using OsmSharp.Streams;
 using System;
 using System.IO;
@@ -42,49 +43,72 @@ namespace Sample.GeometryStream.Shape
             {
                 Console.WriteLine($"[{origin}] {level} - {message}");
             };
-
-            await Download.Download.ToFile("http://planet.anyways.eu/planet/europe/luxembourg/luxembourg-latest.osm.pbf", "luxembourg-latest.osm.pbf");
-            
-            await using var fileStream = File.OpenRead("luxembourg-latest.osm.pbf");
-            // create source stream.
-            var source = new PBFOsmStreamSource(fileStream);
-
-            // show progress.
-            var progress = source.ShowProgress();
-
-            // filter all power lines and keep all nodes.
-            var filtered = from osmGeo in progress
-                where osmGeo.Type == OsmSharp.OsmGeoType.Node ||
-                      (osmGeo.Type == OsmSharp.OsmGeoType.Way && osmGeo.Tags != null && osmGeo.Tags.Contains("power", "line"))
-                select osmGeo;
-
-            // convert to a feature stream.
-            // WARNING: nodes that are part of power lines will be kept in-memory.
-            //          it's important to filter only the objects you need **before** 
-            //          you convert to a feature stream otherwise all objects will 
-            //          be kept in-memory.
-            var features = filtered.ToFeatureSource();
-
-            // filter out only linestrings.
-            var lineStrings = from feature in features
-                where feature.Geometry is LineString
-                select feature;
-
-            // build feature collection.
-            var featureCollection = new FeatureCollection();
-            var attributesTable = new AttributesTable {{"type", "powerline"}};
-            foreach (var feature in lineStrings)
-            { // make sure there is a constant # of attributes with the same names before writing the shapefile.
-                featureCollection.Add(new Feature(feature.Geometry, attributesTable));
-            }
-
-            // convert to shape.
-            var header = ShapefileDataWriter.GetHeader(featureCollection.First(), featureCollection.Count);
-            var shapeWriter = new ShapefileDataWriter("luxembourg.shp", new GeometryFactory())
+            var log = OsmSharp.Logging.Logger.Create("mylog");
+            log.Log(OsmSharp.Logging.TraceEventType.Information, "converting","to shape");
+            try
             {
-                Header = header
-            };
-            shapeWriter.Write(featureCollection);
-        }
+                string folder = @"D:\vmwareshare";
+                string name = "virginia-latest"; // "encinopark";
+                string inFile = Path.Combine(folder, name) + ".osm.pbf";
+                string outFile = Path.Combine(folder, name) + ".shp";
+                if (!File.Exists(inFile))
+                    throw new FileNotFoundException($"file not found: {inFile}");
+
+                //await Download.Download.ToFile("http://planet.anyways.eu/planet/europe/luxembourg/luxembourg-latest.osm.pbf", "luxembourg-latest.osm.pbf");
+
+                await using var fileStream = File.OpenRead(inFile);
+                // create source stream.
+                var source = new PBFOsmStreamSource(fileStream);
+
+                // show progress.
+                var progress = source.ShowProgress();
+
+                // filter all power lines and keep all nodes.
+                var filtered = from osmGeo in progress
+                               where osmGeo.Type == OsmSharp.OsmGeoType.Node ||
+                                     (osmGeo.Type == OsmSharp.OsmGeoType.Way && osmGeo.Tags != null && osmGeo.Tags.Contains("power", "line"))
+                               select osmGeo;
+
+                // convert to a feature stream.
+                // WARNING: nodes that are part of power lines will be kept in-memory.
+                //          it's important to filter only the objects you need **before** 
+                //          you convert to a feature stream otherwise all objects will 
+                //          be kept in-memory.
+                var features = filtered.ToFeatureSource();
+
+                // filter out only linestrings.
+                var lineStrings = from feature in features
+                                  where feature.Geometry is LineString
+                                  select feature;
+
+                // build feature collection.
+                var featureCollection = new FeatureCollection();
+                var attributesTable = new AttributesTable { { "type", "powerline" } };
+                foreach (var feature in lineStrings)
+                { // make sure there is a constant # of attributes with the same names before writing the shapefile.
+                    feature.Geometry.SRID = 4326;
+                    featureCollection.Add(new Feature(feature.Geometry, attributesTable));
+                }
+                log.Log(TraceEventType.Information, $"{featureCollection.Count} features read from {name}");
+                // convert to shape.
+                var header = ShapefileDataWriter.GetHeader(featureCollection.First(), featureCollection.Count);
+                //foreach (var f in featureCollection)
+                //    log.Log(TraceEventType.Information, f.Geometry.SRID.ToString());
+                var gf = new GeometryFactory();
+
+                //the resulting shapefile lacks a prj file, need to run define projection as a workaround.
+                //https://pro.arcgis.com/en/pro-app/latest/tool-reference/data-management/define-projection.htm
+                var shapeWriter = new ShapefileDataWriter(outFile, new GeometryFactory(gf.PrecisionModel,4326))
+                {
+                    Header = header                    
+                };
+                shapeWriter.Write(featureCollection);
+
+            }
+            catch (Exception ex)
+            {
+                log.Log(TraceEventType.Error, ex.Message);
+            }
+         }
     }
 }
