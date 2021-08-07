@@ -30,6 +30,7 @@ using OsmSharp.Streams;
 using System;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Threading.Tasks;
 
 namespace Sample.GeometryStream.Shape
@@ -38,6 +39,11 @@ namespace Sample.GeometryStream.Shape
     {
         static async Task Main(string[] args)
         {
+            if(args.Length != 1)
+            {
+                Console.WriteLine($"Usage: {Assembly.GetExecutingAssembly().GetName().Name} <osmpbfFile>");
+                return;
+            }
             // let's show you what's going on.
             OsmSharp.Logging.Logger.LogAction = (origin, level, message, parameters) =>
             {
@@ -47,16 +53,22 @@ namespace Sample.GeometryStream.Shape
             log.Log(OsmSharp.Logging.TraceEventType.Information, "converting","to shape");
             try
             {
-                string folder = @"D:\vmwareshare";
-                string name = "virginia-latest"; // "encinopark";
-                string inFile = Path.Combine(folder, name) + ".osm.pbf";
-                string outFile = Path.Combine(folder, name) + ".shp";
-                if (!File.Exists(inFile))
-                    throw new FileNotFoundException($"file not found: {inFile}");
+                string osmpbfPath = args[0];
+                if (!File.Exists(osmpbfPath))
+                    throw new FileNotFoundException($"file not found: {osmpbfPath}");
 
+                string folder = Path.GetDirectoryName(osmpbfPath);
+                
+                string inName = Path.GetFileNameWithoutExtension(osmpbfPath).Replace(".osm", "");
+                string outName = inName + "-powerlines";
+                string outFile = Path.Combine(folder, outName) + ".shp";
+                string prjFile = Path.Combine(folder, outName) + ".prj";
+                //here's what the Define Projection tool puts in the prj file for WGS84...
+                var wgs84prj = "GEOGCS[\"GCS_WGS_1984\",DATUM[\"D_WGS_1984\",SPHEROID[\"WGS_1984\",6378137.0,298.257223563]],PRIMEM[\"Greenwich\",0.0],UNIT[\"Degree\",0.0174532925199433]]";
+                
                 //await Download.Download.ToFile("http://planet.anyways.eu/planet/europe/luxembourg/luxembourg-latest.osm.pbf", "luxembourg-latest.osm.pbf");
 
-                await using var fileStream = File.OpenRead(inFile);
+                await using var fileStream = File.OpenRead(osmpbfPath);
                 // create source stream.
                 var source = new PBFOsmStreamSource(fileStream);
 
@@ -89,21 +101,20 @@ namespace Sample.GeometryStream.Shape
                     feature.Geometry.SRID = 4326;
                     featureCollection.Add(new Feature(feature.Geometry, attributesTable));
                 }
-                log.Log(TraceEventType.Information, $"{featureCollection.Count} features read from {name}");
+                log.Log(TraceEventType.Information, $"{featureCollection.Count} features read from {inName}");
                 // convert to shape.
                 var header = ShapefileDataWriter.GetHeader(featureCollection.First(), featureCollection.Count);
                 //foreach (var f in featureCollection)
                 //    log.Log(TraceEventType.Information, f.Geometry.SRID.ToString());
                 var gf = new GeometryFactory();
 
-                //the resulting shapefile lacks a prj file, need to run define projection as a workaround.
-                //https://pro.arcgis.com/en/pro-app/latest/tool-reference/data-management/define-projection.htm
                 var shapeWriter = new ShapefileDataWriter(outFile, new GeometryFactory(gf.PrecisionModel,4326))
                 {
                     Header = header                    
                 };
                 shapeWriter.Write(featureCollection);
-
+                //the resulting shapefile lacks a prj file, so create one ...
+                File.WriteAllText(prjFile, wgs84prj);
             }
             catch (Exception ex)
             {

@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "Sample.GeometryStream.Shape": {
+      "commandName": "Project",
+      "commandLineArgs": "D:\\vmwareshare\\virginia-latest.osm.pbf"
+    }
+  }
+}
